@@ -2,53 +2,58 @@ from random import random
 import pandas as pd
 from countmin import CountMinSketch
 
-depths = [2,3,4,5,6,7,8,9,10]
-widths = [500,1000,2000,5000,10000,15000,20000]
-
+depths = [2, 3, 4, 5, 6, 7, 8, 9, 10]
+widths = [500, 1000, 2000, 5000, 10000, 15000, 20000]
 top_k = 100
 
-data = pd.read_pickle('dataset10M.pkl')
-
+# Read dataset
+data = pd.read_pickle('dataset_0.pkl')
 print("pickle read done")
 
-list_vals = []
-val_hash = {}
+# Iterate through dataset and find unique flows and their packet count
+flow_packet_count = {}
+
 for index, row in data.iterrows():
-    val = row['src']+"|"+row['dst']+"|"+str(int(row['sport']))+"|"+str(int(row['dport']))+"|"+str(int(row['proto']))
-    list_vals.append(val)
-    if val in val_hash:
-        val_hash[val]=val_hash[val]+1
+    flow_key = row['src'] + "|" + row['dst'] + "|" + str(int(row['sport'])) + "|" + str(int(row['dport'])) + "|" + str(int(row['proto']))
+    if flow_key not in flow_packet_count:
+        flow_packet_count[flow_key] = 1
     else:
-        val_hash[val]=1
+        flow_packet_count[flow_key] += 1
+print(f"Flow calculations done. Found {len(flow_packet_count)} flows!")
 
-correct_list = []
-for key,val in val_hash.items():
-    correct_list.append([key,val])
+# Finding reverse sorted list of flows for finding top k heavy hitters
+actual_heavy_hitters = []
+for key, val in flow_packet_count.items():
+    actual_heavy_hitters.append([key, val])
 
-#TODO : make a plot that shows the depth needed for each width to approach 100% accuracy, or width needed for each depth to reach 100% accuracy
+actual_heavy_hitters.sort(key=lambda x: x[1], reverse=True)
+print("Actual Heavy Hitters calculated")
 
-correct_list.sort(key=lambda x: x[1], reverse=True)
-print(len(correct_list))
-print("correct list evaluated")
+# TODO : make a plot that shows the depth needed for each width to approach 100% accuracy, or width needed for each depth to reach 100% accuracy
 
 for depth in depths:
+    # Random seeds are used to initialize the "width" hash functions so we effectively get different hashes for the same flow
     seeds = [int(random()*10000) for x in range(depth)]
     for width in widths:
         cm = CountMinSketch(width, depth, seeds)
-        cur_set = set()
-        for val in list_vals:
-            cm.increment(val)
-            cur_set.add(val)
-        
-        cur_approx_list = []
-        for key in cur_set:
-            cur_approx_list.append([key,cm.estimate(key)])
-        cur_approx_list.sort(key=lambda x: x[1], reverse=True)
 
-        #calculate accuracy of top 100 hitters
-        incorrect=0
-        for i in range(top_k):
-            if cur_approx_list[i]!=correct_list[i]:
-                incorrect+=1
+        # Simulate CM Sketch counting
+        for flow, flow_count in flow_packet_count.items():
+            for i in range(0, flow_count):
+                cm.increment(flow)
+
+        # Get estimate of the heavy hitters from CM Sketch
+        cms_heavy_hitters = []
+        for flow, flow_count in flow_packet_count.items():
+            cms_heavy_hitters.append([flow, cm.estimate(flow)])
         
+        # Reverse sorting list of flows for finding top k heavy hitters
+        cms_heavy_hitters.sort(key=lambda x: x[1], reverse=True)
+
+        # calculate accuracy of top 100 hitters
+        incorrect = 0
+        for i in range(top_k):
+            if cms_heavy_hitters[i] != actual_heavy_hitters[i]:
+                incorrect += 1
+
         print(depth, width, "accuracy ", ((top_k-incorrect)/top_k)*100, "%")
